@@ -1,0 +1,17 @@
+{
+  "name": "scioly-rating",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "rebuild": "node scripts/rebuild-ratings.js",
+    "validate": "node scripts/validate-standings.js"
+  },
+  "dependencies": {
+    "sciolyff": "0.20.1"
+  }
+}
