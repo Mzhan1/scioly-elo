@@ -1,6 +1,6 @@
 # SO Rating v2 model card
 
-This file describes `so-rating-v2.3`. The implementation in
+This file describes `so-rating-v2.4`. The implementation in
 `src/ratings/model.js` is authoritative; constants are versioned in
 `config/model_v2.json`.
 
@@ -130,18 +130,22 @@ include entering rating, uncertainty, selected event squad, expected and actual
 performance, performance rating, information weight, delta, and resulting
 state.
 
-The event K-factor is 235 rather than the overall model's 110 because event
+The event K-factor is 235 rather than the overall model's 80 because event
 ratings do not use the overall-score margin multiplier. This produces a similar
 public rating spread while leaving the expected-score divisor at the same genuine
 400-point Elo scale.
 
 ## Current validation and limitations
 
-Compared with v1, v2.3 reduces chronological 2022–2026 normalized-rank MAE from
-approximately 0.409 to 0.274. Among satellite priors tested from 0.60 through
-0.80, 0.75 preserves the intended national rating scale while outperforming the
-more aggressive discounts. This was a comparative chronological check, not a
-final independent calibration study.
+Compared with v1, v2.3 reduced chronological normalized-rank error substantially.
+Overall v2.4 lowers the K-factor from 110 to 80 to compress the elite tail while
+retaining the genuine 400-point Elo expectation scale. On the September 2026
+Division C archive, the change reduces the number of current programs rated at
+least 2700 from 13 to 2 and the number rated at least 2500 from 32 to 19. The top
+rating moves from approximately 3059 to 2886. Chronological 2022–2026
+normalized-rank MAE changes from approximately 0.258 to 0.263. The 93% annual
+overall carryover remains unchanged because whole-program strength is more stable
+than strength in any single event.
 
 The event v1.3 chronological 2022–2026 normalized-rank MAE was approximately
 0.205 across 711,841 snapshots. Its higher K-factor trades about 0.002 rank MAE

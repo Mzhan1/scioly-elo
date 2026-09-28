@@ -1,10 +1,10 @@
 {
-  "modelVersion": "so-rating-v2.3",
+  "modelVersion": "so-rating-v2.4",
   "mean": 1500,
   "initialUncertainty": 300,
   "minimumUncertainty": 35,
   "maximumUncertainty": 350,
-  "baseK": 110,
+  "baseK": 80,
   "minimumUncertaintyFactor": 0.5,
   "maximumUncertaintyFactor": 0.7,
   "maximumEffectiveGames": 12,
