@@ -14,8 +14,8 @@ function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-function expectedScore(rating, opponentRating) {
-  return 1 / (1 + 10 ** ((opponentRating - rating) / 400));
+function expectedScore(rating, opponentRating, divisor = 400) {
+  return 1 / (1 + 10 ** ((opponentRating - rating) / divisor));
 }
 
 function actualScore(rank, opponentRank) {
@@ -200,7 +200,7 @@ export class RatingEngine {
       const middle = (low + high) / 2;
       const score = weightedMean(
         opponents,
-        (opponent) => expectedScore(middle, opponent.state.rating),
+        (opponent) => expectedScore(middle, opponent.state.rating, this.config.ratingDivisor),
       );
       if (score < target) low = middle;
       else high = middle;
@@ -236,7 +236,7 @@ export class RatingEngine {
       const opponents = prepared.filter((other) => other !== item);
       const expected = weightedMean(
         opponents,
-        (opponent) => expectedScore(item.state.rating, opponent.state.rating),
+        (opponent) => expectedScore(item.state.rating, opponent.state.rating, this.config.ratingDivisor),
       );
       const actual = weightedMean(
         opponents,
@@ -255,7 +255,7 @@ export class RatingEngine {
           (actualScore(
             item.entry.officialOverallRank,
             opponent.entry.officialOverallRank,
-          ) - expectedScore(item.state.rating, opponent.state.rating)),
+          ) - expectedScore(item.state.rating, opponent.state.rating, this.config.ratingDivisor)),
       );
       const uncertaintyFactor = clamp(
         item.state.uncertainty / this.config.initialUncertainty,
@@ -311,6 +311,11 @@ export class RatingEngine {
         representativeTeamEntryId: item.entry.id,
         representativeTeamNumber: item.entry.number,
         officialOverallRank: item.entry.officialOverallRank,
+        representativeOverallRank: 1 + opponents.reduce(
+          (sum, opponent) => sum + 1 - actualScore(
+            item.entry.officialOverallRank, opponent.entry.officialOverallRank,
+          ), 0,
+        ),
         fieldSize: prepared.length,
         effectiveFieldSize: prepared.reduce(
           (sum, participant) => sum + participant.evidenceWeight,
@@ -333,7 +338,11 @@ export class RatingEngine {
         formatPrior: strength.formatPrior,
         expectedPerformance: expected,
         actualPerformance: actual,
-        expectedRank: 1 + opponents.length * (1 - expected),
+        expectedRank: 1 + opponents.reduce(
+          (sum, opponent) => sum + 1 - expectedScore(
+            item.state.rating, opponent.state.rating, this.config.ratingDivisor,
+          ), 0,
+        ),
         performanceRating,
         informationWeight: strength.informationWeight,
         effectiveGames,

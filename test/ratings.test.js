@@ -254,7 +254,7 @@ test("insufficient overall event coverage is stored but not rated", () => {
   assert.equal(snapshots.length, 2);
 });
 
-test("a season boundary regresses ratings toward 1500 and increases uncertainty", () => {
+test("a season boundary preserves overall rating and increases uncertainty", () => {
   const tournament = ratingTournament({
     date: "2026-01-15",
     season: 2026,
@@ -274,11 +274,11 @@ test("a season boundary regresses ratings toward 1500 and increases uncertainty"
     lastDate: "2025-05-15",
   });
   const prepared = engine.prepareState(entry, tournament);
-  assert.equal(prepared.rating, 1872);
+  assert.equal(prepared.rating, 1900);
   assert.ok(prepared.uncertainty > 80);
 });
 
-test("multiple missed seasons apply carryover once per boundary", () => {
+test("multiple missed seasons preserve overall rating", () => {
   const tournament = ratingTournament({
     date: "2027-01-15",
     season: 2027,
@@ -298,7 +298,35 @@ test("multiple missed seasons apply carryover once per boundary", () => {
     lastDate: "2025-05-15",
   });
   const prepared = engine.prepareState(entry, tournament);
-  assert.equal(prepared.rating, 1500 + 0.93 ** 2 * 400);
+  assert.equal(prepared.rating, 1900);
+});
+
+test("compressed rating units preserve predictions across seasons and split squads", () => {
+  const reference = structuredClone(config);
+  const factor = 400 / config.ratingDivisor;
+  reference.ratingDivisor = 400;
+  for (const key of ["baseK", "initialUncertainty", "minimumUncertainty", "maximumUncertainty",
+    "seasonUncertaintyIncrease", "inactivityUncertaintyPerYear",
+    "sameDayFieldStrengthTemperature", "fieldQualityRatingDivisor"]) {
+    reference[key] *= factor;
+  }
+  const tournaments = [
+    ratingTournament({ id: "early", date: "2024-01-01", season: 2024,
+      schools: [{ name: "Alpha", rank: 1 }, { name: "Beta", rank: 2 }] }),
+    ratingTournament({ id: "next", date: "2025-01-01", season: 2025,
+      schools: [{ name: "Beta", rank: 1 }, { name: "Alpha", rank: 2 }] }),
+    ratingTournament({ id: "split", date: "2025-01-01", season: 2025,
+      schools: [{ name: "Alpha", rank: 1 }, { name: "Gamma", rank: 2 }] }),
+  ];
+  const compressed = new RatingEngine(config).rebuild(tournaments).snapshots;
+  const original = new RatingEngine(reference).rebuild(tournaments).snapshots;
+  compressed.forEach((s, index) => {
+    const r = original[index];
+    assert.ok(Math.abs(s.expectedPerformance - r.expectedPerformance) < 1e-12);
+    assert.ok(Math.abs(s.lineupReliabilityWeight - r.lineupReliabilityWeight) < 1e-12);
+    assert.ok(Math.abs((s.postRating - config.mean) * factor - (r.postRating - config.mean)) < 1e-9);
+    assert.ok(Math.abs(s.postUncertainty * factor - r.postUncertainty) < 1e-9);
+  });
 });
 
 test("rebuild is deterministic and processes tournaments chronologically", () => {

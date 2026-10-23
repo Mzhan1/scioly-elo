@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b1120" />
+    <meta name="description" content="Explore Division C Science Olympiad program ratings over time." />
+    <title>Scioly Ratings — Team analytics</title>
+    <link rel="icon" href="./mark.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css?v=2" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="Scioly Ratings home">
+        <span class="brand-mark" aria-hidden="true">S</span>
+        <span>Scioly<span>Ratings</span></span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a class="active" href="#analytics">Analytics</a>
+        <a href="#leaderboard">Leaderboard</a>
+        <a href="#about">Methodology</a>
+      </nav>
+      <div class="season-indicator"><span></span><strong id="season-label">2026</strong> season</div>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="page-title">
+        <div class="division-badge"><span></span> Division C</div>
+        <h1 id="page-title">Follow every rise.<br /><em>Understand every result.</em></h1>
+        <p>Explore program strength across seasons, compare rating paths, and see the tournaments behind every move.</p>
+        <div class="dataset-note"><span id="school-count">—</span> programs <i></i> <span id="snapshot-count">—</span> tournament ratings</div>
+      </section>
+
+      <section class="analytics-shell" id="analytics" aria-labelledby="analytics-title">
+        <div class="shell-heading">
+          <div>
+            <span class="eyebrow">Team performance</span>
+            <h2 id="analytics-title">Rating history</h2>
+          </div>
+          <div class="view-switch" role="group" aria-label="Chart range">
+            <button type="button" data-range="1">1Y</button>
+            <button type="button" data-range="3">3Y</button>
+            <button type="button" data-range="5">5Y</button>
+            <button type="button" class="active" data-range="all">All</button>
+          </div>
+        </div>
+
+        <div class="school-picker">
+          <label for="school-search">Select schools <span>Compare up to 4 programs</span></label>
+          <div class="search-wrap">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21 21-4.3-4.3m2.3-5.2a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z" /></svg>
+            <input id="school-search" type="search" placeholder="Search by school, city, or state…" autocomplete="off" aria-autocomplete="list" aria-controls="school-results" />
+            <kbd>⌘ K</kbd>
+          </div>
+          <div class="search-results" id="school-results" role="listbox" hidden></div>
+          <div class="selected-schools" id="selected-schools" aria-live="polite"></div>
+        </div>
+
+        <div class="metrics" id="metrics" aria-live="polite"></div>
+
+        <div class="chart-card">
+          <div class="chart-heading">
+            <div>
+              <h3>Overall rating</h3>
+              <p>Updated after each rated tournament</p>
+            </div>
+            <button class="download-button" id="download-button" type="button">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" /></svg>
+              Export CSV
+            </button>
+          </div>
+          <div class="chart-wrap" id="chart-wrap">
+            <svg id="rating-chart" role="img" aria-labelledby="chart-title chart-desc">
+              <title id="chart-title">School rating history</title>
+              <desc id="chart-desc">A line chart of selected schools' ratings over time.</desc>
+            </svg>
+            <div class="chart-tooltip" id="chart-tooltip" hidden></div>
+            <div class="chart-empty" id="chart-empty" hidden>No rating history in this range.</div>
+          </div>
+          <div class="chart-legend" id="chart-legend"></div>
+        </div>
+
+        <div class="lower-grid">
+          <section class="history-panel" aria-labelledby="history-title">
+            <div class="panel-title">
+              <div>
+                <span class="eyebrow">Selected school</span>
+                <h3 id="history-title">Recent tournaments</h3>
+              </div>
+              <span id="history-name"></span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Tournament</th><th>Place</th><th>Rating</th><th>Change</th></tr></thead>
+                <tbody id="history-body"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <aside class="leaderboard-panel" id="leaderboard" aria-labelledby="leaderboard-title">
+            <div class="panel-title">
+              <div>
+                <span class="eyebrow">Division C</span>
+                <h3 id="leaderboard-title">Top programs</h3>
+              </div>
+              <span>National</span>
+            </div>
+            <ol id="leaderboard-list"></ol>
+          </aside>
+        </div>
+      </section>
+
+      <section class="methodology" id="about">
+        <span class="section-number">01 / THE MODEL</span>
+        <div>
+          <h2>One number,<br />with context.</h2>
+        </div>
+        <div>
+          <p>Ratings update chronologically from head-to-head tournament performance, adjusted for field quality, evidence coverage, uncertainty, and inactivity.</p>
+          <div class="method-tags"><span>Uncertainty-aware</span><span>No future leakage</span><span>Auditable data</span></div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <a class="brand compact" href="#top"><span class="brand-mark">S</span> SciolyRatings</a>
+      <p>Independent Science Olympiad rating analysis.</p>
+      <p id="model-version">Model —</p>
+    </footer>
+
+    <script type="module" src="./app.js?v=2"></script>
+  </body>
+</html>

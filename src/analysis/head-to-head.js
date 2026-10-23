@@ -6,8 +6,8 @@ import {
   tournamentFormat,
 } from "../ratings/evidence.js";
 
-function expectedScore(rating, opponentRating) {
-  return 1 / (1 + 10 ** ((opponentRating - rating) / 400));
+function expectedScore(rating, opponentRating, divisor) {
+  return 1 / (1 + 10 ** ((opponentRating - rating) / divisor));
 }
 
 function pairKey(left, right) {
@@ -26,6 +26,7 @@ export function auditHeadToHead(
     minimumCoverage = 0.75,
     formatPrior = { traditional: 1, hybrid: 0.8, satellite: 0.75 },
     sameDaySplitSquadExponent = 0.5,
+    ratingDivisor = 400,
   } = {},
 ) {
   const latestSeason = Math.max(...[...currentStates.values()].map((state) => state.lastSeason));
@@ -98,7 +99,7 @@ export function auditHeadToHead(
       const higherScore = lower === first ? pair.secondScore : pair.firstScore;
       const weightedMeetings = lowerScore + higherScore;
       const observedLowerScore = lowerScore / weightedMeetings;
-      const predictedLowerScore = expectedScore(lower.rating, higher.rating);
+      const predictedLowerScore = expectedScore(lower.rating, higher.rating, ratingDivisor);
       return {
         lowerRatedSchool: lower.canonicalName,
         lowerState: lower.state,

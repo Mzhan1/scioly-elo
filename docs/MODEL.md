@@ -1,12 +1,15 @@
 # SO Rating v2 model card
 
-This file describes `so-rating-v2.4`. The implementation in
+This file describes `so-rating-v2.6`. The implementation in
 `src/ratings/model.js` is authoritative; constants are versioned in
 `config/model_v2.json`.
 
-## Genuine Elo-scale ratings
+## Rating units and predictions
 
-SO Rating is the value used directly in expected-score calculations. There is
+SO Rating is the value used directly in expected-score calculations. Overall
+ratings use a 225-point logistic divisor; event ratings retain their 400-point
+divisor. These scales have different probability meanings: a 225-point overall
+advantage implies a 10:1 expected pairwise win ratio. There is
 no display multiplier, latent display scale, or fixed tournament-change cap. A
 2800 team facing a 1500 field is treated as an overwhelming favorite, so
 repeated weak-field wins provide almost no additional rating. Tournament volume
@@ -38,7 +41,7 @@ particular teams from standings alone.
 
 When a school appears in multiple tournaments on the same date, lineup evidence
 is allocated toward the stronger entering field. Raw weights decay exponentially
-with a 200-point field-strength temperature, have a 0.2 floor, and are normalized
+with a 112.5-point field-strength temperature, have a 0.2 floor, and are normalized
 to one squared-information budget. Equal fields therefore still receive
 `1 / sqrt(number of tournaments)` each, while a clearly stronger field approaches
 weight 1. All results on that date use the same entering rating and are committed
@@ -60,10 +63,10 @@ the raw pair count of a huge tournament from creating quadratic influence.
 
 ## Rating update
 
-For school `i` and opponent `j`, expected score uses the standard Elo logistic:
+For school `i` and opponent `j`, expected overall score uses:
 
 ```text
-E(i,j) = 1 / (1 + 10 ^ ((Rj - Ri) / 400))
+E(i,j) = 1 / (1 + 10 ^ ((Rj - Ri) / 225))
 ```
 
 Actual pairwise scores are 1 for finishing ahead, 0.5 for an overall-rank tie,
@@ -71,7 +74,7 @@ and 0 for finishing behind. Each pairwise residual is multiplied by a bounded
 score-margin factor:
 
 ```text
-margin multiplier = min(1.75, 1 + 0.30 * ln(1 + point margin / scored events))
+margin multiplier = min(1.75, 1 + 0.60 * ln(1 + point margin / scored events))
 ```
 
 Normalizing by the number of scored events makes margins comparable across
@@ -91,11 +94,15 @@ bounded independently.
 ## Uncertainty and seasons
 
 Uncertainty grows with inactivity and shrinks with new evidence, subject to
-configured floors and ceilings. At every missed season boundary, distance from
-1500 is multiplied by 0.93 and transition variance is added. The 0.93 carryover
-was selected from the tested candidates because it produced the lowest
-chronological 2022–2026 normalized-rank error; it remains a parameter to revisit
-with a formal train/validation split.
+configured floors and ceilings. Overall ratings retain 100% of their value
+across season boundaries. Transition variance is still added, allowing fresh
+evidence to correct a changed roster. Optimization doubles the learning rate
+from K=60 to K=120 in v2.5 units and increases the score-margin coefficient from
+0.30 to 0.60 while keeping its 1.75 cap. The optimized rating units are then
+compressed by a fixed factor of 0.75 around 1500, yielding K=90 and divisor=225.
+Uncertainty bounds and growth, field-quality divisor, and same-day temperature
+are scaled by the same factor. This last step preserves the optimized model's
+predictions and learning dynamics while producing smaller numerical gaps.
 
 ## Performance rating
 
@@ -106,7 +113,7 @@ Perfect and winless finishes are clamped to 0.99 and 0.01 for a finite result.
 ## Event ratings
 
 `so-event-v1.4` maintains an independent rating and uncertainty for every
-school/canonical-event pair on the same genuine Elo scale as the overall model.
+school/canonical-event pair using its own 400-point expectation divisor.
 For each school and event, the best valid placing may come from any of the
 school's non-exhibition squads; different events may therefore select different
 squads. Unknown, missing, exempt, disqualified, trial, and trialed results are
@@ -118,11 +125,11 @@ Updates use the same tournament level, format prior, top-heavy field principle,
 and same-day lineup allocation as the overall model. Overall tournament point
 margins do not enter event ratings.
 
-Event uncertainty starts at 300, has the same 35-point floor as the overall
-model, and grows by 70 points of variance per inactive year. Division C event
+Event uncertainty starts at 300, has a 35-point floor,
+and grows by 70 points of variance per inactive year. Division C event
 ratings retain 70% of their distance from 1500 at each season boundary. After a
 five-season gap, only 16.8% of the earlier rating advantage remains. This is much
-more aggressive than the 93% overall-program carryover because an event depends
+more aggressive than the 100% overall-program carryover because an event depends
 on only a few students, while overall strength is a composite of roughly 23
 events. Event partners, specialists, rules, and topics also change quickly, and
 a four-year gap generally turns over the entire student roster. Event histories
@@ -130,22 +137,48 @@ include entering rating, uncertainty, selected event squad, expected and actual
 performance, performance rating, information weight, delta, and resulting
 state.
 
-The event K-factor is 235 rather than the overall model's 80 because event
-ratings do not use the overall-score margin multiplier. This produces a similar
-public rating spread while leaving the expected-score divisor at the same genuine
-400-point Elo scale.
+The event K-factor remains 235 and its expected-score divisor remains 400.
+Overall K is 90 in the compressed units. Overall and event rating numbers are
+not interchangeable probability scales.
 
 ## Current validation and limitations
 
-Compared with v1, v2.3 reduced chronological normalized-rank error substantially.
-Overall v2.4 lowers the K-factor from 110 to 80 to compress the elite tail while
-retaining the genuine 400-point Elo expectation scale. On the September 2026
-Division C archive, the change reduces the number of current programs rated at
-least 2700 from 13 to 2 and the number rated at least 2500 from 32 to 19. The top
-rating moves from approximately 3059 to 2886. Chronological 2022–2026
-normalized-rank MAE changes from approximately 0.258 to 0.263. The 93% annual
-overall carryover remains unchanged because whole-program strength is more stable
-than strength in any single event.
+Corrected overall evaluation compares unweighted expected finishing ranks with
+average ranks among the same eligible school representatives. Squad placements
+are not compared directly with school field sizes. Always predicting the middle
+has NMAE approximately 0.267; finite fields yield a baseline somewhat above 0.25.
+
+The October 23 optimization tunes 20 configurations on 2022–2024, evaluates the
+three finalists on 2025, and locks the winner before evaluating 2026. Results:
+
+| Seasons | v2.5 NMAE | v2.6 NMAE |
+| --- | ---: | ---: |
+| 2022–2024 (tuning) | 0.13701 | 0.13176 |
+| 2025 (selection) | 0.13117 | 0.12458 |
+| 2026 (locked comparison) | 0.13122 | 0.12447 |
+| 2022–2026 combined | 0.13430 | 0.12839 |
+
+The combined comparison covers 18,027 appearances on the same archive for both
+models; adding archive results can change these numbers. The improvement is
+4.4% overall and 5.1% on 2026, with lower error in every individual season.
+The 2026 paired date-block bootstrap (2,000 samples, 50 tournament dates) gives
+an error-difference interval of [-0.00868, -0.00475]. This is descriptive sampling
+variability, not a selection-adjusted guarantee of future performance. Prior
+experiments have seen these seasons; future results remain the strongest test.
+Every prediction uses only earlier results, including during evaluation seasons.
+
+Compression preserves optimized expected ranks within 1e-12. The resulting
+current field has one school above 2700 and 18 above 2500, with Troy near 2809.
+These units are fixed; they are not a cap or a dynamic percentile mapping, and
+there is no mathematical upper bound on future ratings.
+
+Reproduce the search using `node scripts/optimize-ratings.js <results-dir>`,
+then `node scripts/verify-optimization.js <results-dir>` with the same archive.
+`output/optimization_report.json` includes configurations, archive commit,
+season metrics, scale checks, and the bootstrap. The frozen v2.5 benchmark
+is `config/model_v2.5.json`.
+For a completed-season rebuild matching this comparison, run
+`node scripts/rebuild-ratings.js <results-dir> output 2026`.
 
 The event v1.3 chronological 2022–2026 normalized-rank MAE was approximately
 0.205 across 711,841 snapshots. Its higher K-factor trades about 0.002 rank MAE

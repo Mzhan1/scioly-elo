@@ -7,11 +7,16 @@ import { loadArchive } from "../src/ingest/archive.js";
 import { auditHeadToHead } from "../src/analysis/head-to-head.js";
 import { EventRatingEngine } from "../src/ratings/events.js";
 import { RatingEngine } from "../src/ratings/model.js";
+import { rankMetrics } from "../src/analysis/rank-metrics.js";
 import { rankedEventStates, rankedStates, toCsv, toCsvRows } from "../src/export/csv.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const archive = path.resolve(process.argv[2] ?? path.join(root, "data/duosmium/data/results"));
 const output = path.resolve(process.argv[3] ?? path.join(root, "output"));
+const throughSeason = process.argv[4] === undefined ? Infinity : Number(process.argv[4]);
+if (throughSeason !== Infinity && (!Number.isInteger(throughSeason) || throughSeason < 1900)) {
+  throw new Error("Optional through-season must be an integer year");
+}
 const config = JSON.parse(fs.readFileSync(path.join(root, "config/model_v2.json"), "utf8"));
 const eventHistoryColumns = [
   "schoolId", "canonicalName", "city", "state", "division", "eventKey",
@@ -29,11 +34,13 @@ const eventHistoryColumns = [
 
 if (!fs.existsSync(archive)) {
   console.error(`Duosmium results directory not found: ${archive}`);
-  console.error("Usage: node scripts/rebuild-ratings.js <duosmium-results-dir> [output-dir]");
+  console.error("Usage: node scripts/rebuild-ratings.js <duosmium-results-dir> [output-dir] [through-season]");
   process.exit(2);
 }
 
-const { tournaments, errors } = loadArchive(archive);
+const { tournaments: archiveTournaments, errors } = loadArchive(archive);
+const tournaments = archiveTournaments.filter(tournament => tournament.season <= throughSeason);
+if (!tournaments.length) throw new Error("No eligible tournaments in requested season range");
 fs.mkdirSync(output, { recursive: true });
 const engine = new RatingEngine(config);
 const { states, snapshots } = engine.rebuild(tournaments);
@@ -79,14 +86,7 @@ const predictionMetrics = {
         sum + Math.abs(snapshot.expectedPerformance - snapshot.actualPerformance),
       0,
     ) / validationSnapshots.length,
-  normalizedRankMeanAbsoluteError:
-    validationSnapshots.reduce(
-      (sum, snapshot) =>
-        sum +
-        Math.abs(snapshot.expectedRank - snapshot.officialOverallRank) /
-          Math.max(1, snapshot.fieldSize - 1),
-      0,
-    ) / validationSnapshots.length,
+  ...rankMetrics(validationSnapshots),
 };
 const eventPredictionMetrics = {
   seasons: "2022+",
@@ -123,6 +123,7 @@ const currentEventStates = new Map(
 const eventRankings = rankedEventStates(currentEventStates);
 const rankingAudit = auditHeadToHead(tournaments, currentStates, {
   formatPrior: config.formatPrior,
+  ratingDivisor: config.ratingDivisor,
 });
 const rankingColumns = [
   "nationalRank", "stateRank", "schoolId", "canonicalName", "city", "state",
@@ -131,7 +132,7 @@ const rankingColumns = [
 const historyColumns = [
   "schoolId", "canonicalName", "city", "state", "division", "tournamentId",
   "tournamentName", "date", "season", "level", "representativeTeamEntryId",
-  "representativeTeamNumber", "officialOverallRank", "totalPoints", "fieldSize",
+  "representativeTeamNumber", "officialOverallRank", "representativeOverallRank", "totalPoints", "fieldSize",
   "fieldAverageRating", "topFieldStrength", "topFieldSize", "fieldStrength",
   "effectiveFieldSize", "evidenceCoverage", "evidenceWeight",
   "coverageEvidenceWeight", "sameDayTournamentCount", "lineupReliabilityWeight",
@@ -179,6 +180,8 @@ fs.writeFileSync(
   JSON.stringify(
     {
       modelVersion: config.modelVersion,
+      ratingDivisor: config.ratingDivisor ?? 400,
+      throughSeason: Number.isFinite(throughSeason) ? throughSeason : undefined,
       eventModelVersion: config.eventModel.modelVersion,
       tournamentsProcessed: tournaments.length,
       schoolsRated: states.size,

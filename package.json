@@ -9,7 +9,9 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "rebuild": "node scripts/rebuild-ratings.js",
-    "validate": "node scripts/validate-standings.js"
+    "validate": "node scripts/validate-standings.js",
+    "web:data": "node scripts/build-web-data.js",
+    "web": "node scripts/serve-web.js"
   },
   "dependencies": {
     "sciolyff": "0.20.1"
