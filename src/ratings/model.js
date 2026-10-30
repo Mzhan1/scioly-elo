@@ -1,4 +1,6 @@
 import { representativeEntries } from "../scoring/sciolyff.js";
+import { fullStrengthAssessment } from "./lineup.js";
+import { NationalsAdjustment } from "./nationals.js";
 import {
   appearanceKey,
   competitiveLineupWeights,
@@ -72,6 +74,8 @@ export class RatingEngine {
     this.snapshots = [];
     this.concurrentCounts = new Map();
     this.sameDayLineupWeights = new Map();
+    this.nationals = new NationalsAdjustment(config.nationalsAdjustment, config.ratingDivisor);
+    this.nationalsPredictions = [];
   }
 
   currentState(entry) {
@@ -85,6 +89,7 @@ export class RatingEngine {
       rating: this.config.mean,
       uncertainty: this.config.initialUncertainty,
       appearances: 0,
+      recentSquadCounts: [],
       lastSeason: undefined,
       lastDate: undefined,
     };
@@ -194,8 +199,9 @@ export class RatingEngine {
         actualScore(item.entry.officialOverallRank, opponent.entry.officialOverallRank),
     );
     const target = clamp(actual, 0.01, 0.99);
-    let low = 0;
-    let high = 4000;
+    const divisor = this.config.ratingDivisor ?? 400;
+    let low = Math.min(...prepared.map(other => other.state.rating)) - 4 * divisor;
+    let high = Math.max(...prepared.map(other => other.state.rating)) + 4 * divisor;
     for (let iteration = 0; iteration < 48; iteration += 1) {
       const middle = (low + high) / 2;
       const score = weightedMean(
@@ -208,13 +214,46 @@ export class RatingEngine {
     return (low + high) / 2;
   }
 
+  evaluateNationalsField(tournament, stateOverrides) {
+    if (String(tournament.level).trim().toLowerCase() !== 'nationals') return [];
+    const entries = representativeEntries(tournament).filter(entry =>
+      !entry.exhibition && !entry.disqualified && Number.isFinite(entry.officialOverallRank));
+    return this.nationals.evaluateField(tournament, entries.map(entry => ({
+      schoolId: entry.schoolId, canonicalName: entry.canonicalName, city: entry.city,
+      state: entry.state, division: entry.division, officialOverallRank: entry.officialOverallRank,
+      evidenceCoverage: entry.evidenceCoverage ?? 1,
+      preRating: (stateOverrides?.get(entry.schoolKey) ?? this.prepareState(entry, tournament)).rating,
+    })));
+  }
+
+  commitNationals(fields, snapshots) {
+    for (const rows of fields) this.nationals.observeField(rows);
+    for (const rows of fields) for (const row of rows) {
+      const after = this.nationals.summary(row.schoolId, row.date, { inclusive: true });
+      this.nationalsPredictions.push({ ...row, postNationalsAdjustment: after.adjustment,
+        postNationalsAppearances: after.appearances });
+    }
+    for (const snapshot of snapshots) {
+      const after = this.nationals.summary(snapshot.schoolId, snapshot.date, { inclusive: true });
+      snapshot.postNationalsAdjustment = after.adjustment;
+      snapshot.postNationalsAppearances = after.appearances;
+      snapshot.nationalsPostRating = (snapshot.combinedSameDayPostRating ?? snapshot.postRating) + after.adjustment;
+      snapshot.nationalsRatingChange = snapshot.ratingChange +
+        (String(snapshot.level).trim().toLowerCase() === 'nationals' ? after.adjustment - snapshot.nationalsAdjustment : 0);
+    }
+  }
+
   rateTournament(tournament, { stateOverrides, commit = true } = {}) {
+    const nationalsField = commit ? this.evaluateNationalsField(tournament, stateOverrides) : [];
     const entries = representativeEntries(tournament, { rateableOnly: true }).filter(
       (entry) =>
         (entry.evidenceCoverage ?? 1) >=
         this.config.minimumOverallEvidenceCoverage,
     );
-    if (entries.length < 2) return [];
+    if (entries.length < 2) {
+      if (commit) this.commitNationals([nationalsField], []);
+      return [];
+    }
 
     const prepared = entries.map((entry) => {
       const sameDayTournamentCount =
@@ -231,6 +270,46 @@ export class RatingEngine {
         evidenceWeight: coverageWeight * lineupReliabilityWeight,
       };
     });
+    // Freeze prediction diagnostics before inferring reliability from this result.
+    // Outcome-dependent weights must never enter reported pre-result forecasts.
+    const forecasts = new Map(prepared.map((item) => {
+      const opponents = prepared.filter(other => other !== item);
+      const expected = weightedMean(opponents, opponent => expectedScore(
+        item.state.rating, opponent.state.rating, this.config.ratingDivisor,
+      ));
+      const actual = weightedMean(opponents, opponent => actualScore(
+        item.entry.officialOverallRank, opponent.entry.officialOverallRank,
+      ));
+      const performanceRating = this.performanceRating(item, prepared);
+      // Perfect results are clamped for finite performance diagnostics. That
+      // numerical convention must not turn a favorite's win into a bad result.
+      const performanceDeficit = actual < expected ? Math.max(0, item.state.rating - performanceRating) : 0;
+      return [item, { expected, actual, performanceRating, performanceDeficit }];
+    }));
+    for (const item of prepared) {
+      const forecast = forecasts.get(item);
+      item.squadCount = tournament.teamEntries.filter(entry =>
+        entry.schoolKey === item.entry.schoolKey && !entry.exhibition && !entry.disqualified,
+      ).length;
+      const recent = item.state.recentSquadCounts ?? [];
+      const usualSquadCount = recent.length ? [...recent].sort((a,b) => a-b)[Math.floor(recent.length/2)] : 1;
+      item.lineupAssessment = fullStrengthAssessment({
+        level: tournament.level,
+        performanceDeficit: forecast.performanceDeficit,
+        uncertainty: item.state.uncertainty,
+        appearances: item.state.appearances,
+        evidenceCoverage: item.entry.evidenceCoverage ?? 1,
+        sameDayTournamentCount: item.sameDayTournamentCount,
+        daysSincePreviousAppearance: item.state.lastDate ?
+          (Date.parse(tournament.date) - Date.parse(item.state.lastDate)) / 86_400_000 : Infinity,
+        squadCount: item.squadCount,
+        usualSquadCount,
+        month: Number(tournament.date.slice(5,7)),
+      }, this.config.lineupModel);
+    }
+    // Assess everyone against the original frozen field in one pass. Then weight
+    // both the school's update and its influence as another school's opponent.
+    for (const item of prepared) item.evidenceWeight *= item.lineupAssessment.weight;
     const strength = this.tournamentInformationWeight(prepared, tournament);
     const tournamentSnapshots = prepared.map((item) => {
       const opponents = prepared.filter((other) => other !== item);
@@ -262,6 +341,11 @@ export class RatingEngine {
         this.config.minimumUncertaintyFactor,
         this.config.maximumUncertaintyFactor,
       );
+      // Relative opponent weights cancel in a dual. Preserve the absolute loss
+      // of support when the entire remaining field is likely nonrepresentative.
+      const opponentEvidenceFactor = this.config.lineupModel?.enabled ? Math.min(
+        1, opponents.reduce((sum, opponent) => sum + opponent.evidenceWeight, 0),
+      ) : 1;
       const effectiveGames = Math.min(
         this.config.maximumEffectiveGames,
         1 +
@@ -277,6 +361,7 @@ export class RatingEngine {
         effectiveGames *
         strength.informationWeight *
         uncertaintyFactor *
+        opponentEvidenceFactor *
         item.evidenceWeight *
         marginAdjustedResidual;
       const postUncertainty = clamp(
@@ -284,17 +369,20 @@ export class RatingEngine {
           Math.sqrt(
             1 +
               item.evidenceWeight *
+                opponentEvidenceFactor *
                 strength.informationWeight *
                 Math.max(0.35, 4 * expected * (1 - expected)),
           ),
         this.config.minimumUncertainty,
         this.config.maximumUncertainty,
       );
-      const performanceRating = this.performanceRating(item, prepared);
+      const forecast = forecasts.get(item);
       const uncertaintyInformation =
         item.evidenceWeight *
+        opponentEvidenceFactor *
         strength.informationWeight *
         Math.max(0.35, 4 * expected * (1 - expected));
+      const nationals = this.nationals.summary(item.entry.schoolId, tournament.date);
 
       return {
         schoolId: item.entry.schoolId,
@@ -325,7 +413,14 @@ export class RatingEngine {
         coverageEvidenceWeight: item.coverageWeight,
         sameDayTournamentCount: item.sameDayTournamentCount,
         lineupReliabilityWeight: item.lineupReliabilityWeight,
+        fullStrengthProbability: item.lineupAssessment.probability,
+        fullStrengthWeight: item.lineupAssessment.weight,
+        fullStrengthPrior: item.lineupAssessment.prior,
+        lineupAssessmentReason: item.lineupAssessment.reason,
+        performanceDeficit: forecast.performanceDeficit,
+        squadCount: item.squadCount,
         evidenceWeight: item.evidenceWeight,
+        opponentEvidenceFactor,
         totalPoints: item.entry.totalPoints,
         averageScoreMarginMultiplier,
         marginAdjustedResidual,
@@ -336,17 +431,22 @@ export class RatingEngine {
         fieldQuality: strength.fieldQuality,
         tournamentFormat: strength.tournamentFormat,
         formatPrior: strength.formatPrior,
-        expectedPerformance: expected,
-        actualPerformance: actual,
+        expectedPerformance: forecast.expected,
+        actualPerformance: forecast.actual,
+        learningExpectedPerformance: expected,
+        learningActualPerformance: actual,
         expectedRank: 1 + opponents.reduce(
           (sum, opponent) => sum + 1 - expectedScore(
             item.state.rating, opponent.state.rating, this.config.ratingDivisor,
           ), 0,
         ),
-        performanceRating,
+        performanceRating: forecast.performanceRating,
         informationWeight: strength.informationWeight,
         effectiveGames,
         preRating: item.state.rating,
+        nationalsPreRating: item.state.rating + nationals.adjustment,
+        nationalsAdjustment: nationals.adjustment,
+        priorNationalsAppearances: nationals.appearances,
         postRating: item.state.rating + ratingChange,
         preUncertainty: item.state.uncertainty,
         postUncertainty,
@@ -354,6 +454,7 @@ export class RatingEngine {
         ratingChange,
         modelVersion: this.config.modelVersion,
         priorAppearances: item.state.appearances,
+        priorSquadCounts: item.state.recentSquadCounts ?? [],
       };
     });
 
@@ -370,11 +471,13 @@ export class RatingEngine {
           rating: snapshot.postRating,
           uncertainty: snapshot.postUncertainty,
           appearances: snapshot.priorAppearances + 1,
+          recentSquadCounts: [...snapshot.priorSquadCounts, snapshot.squadCount].slice(-5),
           lastSeason: snapshot.season,
           lastDate: snapshot.date,
         });
       }
       this.snapshots.push(...tournamentSnapshots);
+      this.commitNationals([nationalsField], tournamentSnapshots);
     }
     return tournamentSnapshots;
   }
@@ -441,6 +544,7 @@ export class RatingEngine {
         });
       }
 
+      const nationalsFields = dateBatch.map(tournament => this.evaluateNationalsField(tournament, stateOverrides));
       const batchSnapshots = dateBatch.flatMap((tournament) =>
         this.rateTournament(tournament, { stateOverrides, commit: false }),
       );
@@ -480,11 +584,13 @@ export class RatingEngine {
           rating: combinedRating,
           uncertainty: combinedUncertainty,
           appearances: baseline.appearances + schoolSnapshots.length,
+          recentSquadCounts: [...(baseline.recentSquadCounts ?? []), ...schoolSnapshots.map(item => item.squadCount)].slice(-5),
           lastSeason: Math.max(...schoolSnapshots.map((item) => item.season)),
           lastDate: latest.date,
         });
       }
       this.snapshots.push(...batchSnapshots);
+      this.commitNationals(nationalsFields, batchSnapshots);
       start = end;
     }
     return { states: this.states, snapshots: this.snapshots };

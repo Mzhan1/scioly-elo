@@ -1,3 +1,5 @@
+import { schoolsForView, historyPointForView, historyRowsForView } from './rating-view.js';
+
 const COLORS = ["#6d8aff", "#43d7a0", "#f5aa59", "#a77bf3"];
 const svgNs = "http://www.w3.org/2000/svg";
 
@@ -5,6 +7,7 @@ const state = {
   data: null,
   selected: [],
   range: "all",
+  ratingView: "general",
   chartSeries: [],
 };
 
@@ -46,17 +49,23 @@ function compactName(school) {
 }
 
 function historyFor(id) {
-  return (state.data.history[id] ?? []).map((point) => ({
-    dateString: point[0],
-    date: new Date(`${point[0]}T00:00:00`),
-    rating: point[1],
-    uncertainty: point[2],
-    tournament: point[3],
-    place: point[4],
-    fieldSize: point[5],
-    change: point[6],
-    level: point[7],
-  }));
+  return historyRowsForView(state.data,id,state.ratingView).map(point => historyPointForView(point, state.ratingView));
+}
+
+function applyRatingView() {
+  state.data.schools = schoolsForView(state.data.baseSchools, state.ratingView);
+  state.data.schoolById = new Map(state.data.schools.map(school => [school.id,school]));
+  document.querySelectorAll('[data-rating-view]').forEach(button => {
+    const active=button.dataset.ratingView===state.ratingView;
+    button.classList.toggle('active',active);
+    button.setAttribute('aria-pressed',String(active));
+  });
+  document.querySelector('#rating-view-title').textContent=state.ratingView==='nationals'?'Nationals rating':'Overall rating';
+  document.querySelector('#rating-view-description').textContent=state.ratingView==='nationals'
+    ? 'Adds each school’s history of performing above or below expectation at earlier Nationals. Rankings include all rated programs.'
+    : 'General program strength from tournament results across the season.';
+  elements.tooltip.hidden=true;
+  elements.results.hidden=true;
 }
 
 function filteredHistory(id) {
@@ -74,6 +83,8 @@ function updateUrl() {
   else url.searchParams.delete("schools");
   if (state.range === "all") url.searchParams.delete("range");
   else url.searchParams.set("range", state.range);
+  if (state.ratingView === 'nationals') url.searchParams.set('rating','nationals');
+  else url.searchParams.delete('rating');
   window.history.replaceState(null, "", url);
 }
 
@@ -120,7 +131,7 @@ function renderMetrics() {
   const stateRank = school?.stateRank ? `#${school.stateRank} · ${school.state}` : "—";
 
   elements.metrics.innerHTML = `
-    <div class="metric"><span>Current rating</span><strong>${formatRating(school?.rating)}</strong>${delta === null ? "" : `<small class="${delta < 0 ? "negative" : ""}">${delta >= 0 ? "+" : ""}${Math.round(delta)} / yr</small>`}</div>
+    <div class="metric"><span>${state.ratingView === 'nationals' ? 'Nationals rating' : 'Current rating'}</span><strong>${formatRating(school?.rating)}</strong>${delta === null ? "" : `<small class="${delta < 0 ? "negative" : ""}">${delta >= 0 ? "+" : ""}${Math.round(delta)} / yr</small>`}${state.ratingView === 'nationals' && school ? `<small>Adjustment ${school.nationalsAdjustment >= 0 ? '+' : ''}${Math.round(school.nationalsAdjustment)} · ${school.priorNationalsAppearances} past Nationals</small>` : ''}</div>
     <div class="metric"><span>National rank</span><strong>${rank}</strong></div>
     <div class="metric"><span>State rank</span><strong>${stateRank}</strong></div>
     <div class="metric"><span>All-time peak</span><strong>${formatRating(peak)}</strong></div>`;
@@ -249,7 +260,7 @@ function renderChart() {
     hoverLine.setAttribute("x1", actualX);
     hoverLine.setAttribute("x2", actualX);
     hoverLine.setAttribute("visibility", "visible");
-    elements.tooltip.innerHTML = `<time>${formatDate(anchor.dateString, { month: "long", day: "numeric", year: "numeric" })}</time>${matches.map((match) => `<div class="tooltip-row"><span><i style="--series-color:${match.color}"></i>${escapeHtml(match.school.name)}</span><strong>${formatRating(match.point.rating)}</strong></div>`).join("")}`;
+    elements.tooltip.innerHTML = `<time>${formatDate(anchor.dateString, { month: "long", day: "numeric", year: "numeric" })}</time>${matches.map((match) => `<div class="tooltip-row"><span><i style="--series-color:${match.color}"></i>${escapeHtml(match.school.name)}</span><strong>${formatRating(match.point.rating)}</strong></div>${match.point.fullStrengthWeight < 0.5 ? `<small>Possible secondary lineup · counted at ${Math.round(match.point.fullStrengthWeight * 100)}%</small>` : ""}`).join("")}`;
     elements.tooltip.hidden = false;
     const relativeX = (actualX / width) * elements.chartWrap.clientWidth;
     const relativeY = (yScale(anchor.rating) / height) * elements.chartWrap.clientHeight;
@@ -268,7 +279,7 @@ function renderHistory() {
   elements.historyBody.innerHTML = rows.length ? rows.map((row) => {
     const change = row.change ?? 0;
     return `<tr>
-      <td><strong>${escapeHtml(row.tournament)}</strong><small>${formatDate(row.dateString, { month: "short", day: "numeric", year: "numeric" })} · ${escapeHtml(row.level)}</small></td>
+      <td><strong>${escapeHtml(row.tournament)}</strong><small>${formatDate(row.dateString, { month: "short", day: "numeric", year: "numeric" })} · ${escapeHtml(row.level)}${row.fullStrengthWeight < 0.5 ? ` · Possible secondary lineup, counted at ${Math.round(row.fullStrengthWeight * 100)}%` : ""}${row.nationalsAdjustmentOnly ? ' · Nationals adjustment only' : ''}</small></td>
       <td>${row.place ?? "—"}<small> / ${row.fieldSize ?? "—"}</small></td>
       <td>${formatRating(row.rating)}</td>
       <td class="${change >= 0 ? "positive" : "negative"}">${change >= 0 ? "+" : ""}${Math.round(change)}</td>
@@ -313,12 +324,14 @@ function render() {
 }
 
 function downloadCsv() {
-  const rows = [["school", "state", "date", "rating", "uncertainty", "tournament", "place", "field_size", "rating_change"]];
+  const rows = [["school", "state", "date", "rating", "uncertainty", "tournament", "place", "field_size", "rating_change", "full_strength_probability", "full_strength_weight", "rating_view", "nationals_adjustment", "past_nationals", "nationals_adjustment_only"]];
   state.selected.forEach((id) => {
     const school = state.data.schoolById.get(id);
     filteredHistory(id).forEach((point) => rows.push([
       school.name, school.state, point.dateString, point.rating, point.uncertainty,
-      point.tournament, point.place, point.fieldSize, point.change,
+      point.tournament, point.place, point.fieldSize, point.change, point.fullStrengthProbability, point.fullStrengthWeight,
+      state.ratingView, point.nationalsAdjustment, point.priorNationalsAppearances,
+      point.nationalsAdjustmentOnly,
     ]));
   });
   const csv = rows.map((row) => row.map((cell) => {
@@ -327,12 +340,19 @@ function downloadCsv() {
   }).join(",")).join("\n");
   const link = document.createElement("a");
   link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-  link.download = "scioly-rating-history.csv";
+  link.download = state.ratingView === 'nationals' ? 'scioly-nationals-rating-history.csv' : 'scioly-rating-history.csv';
   link.click();
   URL.revokeObjectURL(link.href);
 }
 
 function bindEvents() {
+  document.querySelectorAll('[data-rating-view]').forEach(button => {
+    button.addEventListener('click',() => {
+      state.ratingView=button.dataset.ratingView;
+      applyRatingView();
+      render();
+    });
+  });
   elements.search.addEventListener("input", () => renderSearchResults(elements.search.value));
   elements.search.addEventListener("focus", () => renderSearchResults(elements.search.value));
   elements.search.addEventListener("keydown", (event) => {
@@ -373,9 +393,11 @@ async function initialize() {
     const response = await fetch("./data/ratings.json");
     if (!response.ok) throw new Error(`Ratings data returned ${response.status}`);
     state.data = await response.json();
-    state.data.schoolById = new Map(state.data.schools.map((school) => [school.id, school]));
+    state.data.baseSchools = state.data.schools;
 
     const params = new URLSearchParams(window.location.search);
+    state.ratingView = params.get('rating') === 'nationals' ? 'nationals' : 'general';
+    applyRatingView();
     const requested = (params.get("schools") ?? "").split(",").filter((id) => state.data.schoolById.has(id)).slice(0, 4);
     state.selected = requested.length ? requested : [state.data.schools.find((school) => school.active).id];
     state.range = ["1", "3", "5"].includes(params.get("range")) ? params.get("range") : "all";

@@ -57,7 +57,7 @@ function number(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-for (const name of ["all_program_states.csv", "national_rankings.csv", "rating_history.csv"]) {
+for (const name of ["all_program_states.csv", "general_rankings.csv", "nationals_rankings.csv", "rating_history.csv", "nationals_prediction_history.csv"]) {
   const file = path.join(outputDir, name);
   if (!fs.existsSync(file)) {
     console.error(`Missing ${file}. Run pnpm rebuild first.`);
@@ -66,8 +66,11 @@ for (const name of ["all_program_states.csv", "national_rankings.csv", "rating_h
 }
 
 const allStates = readCsv(path.join(outputDir, "all_program_states.csv"));
-const currentStates = readCsv(path.join(outputDir, "national_rankings.csv"));
+const currentStates = readCsv(path.join(outputDir, "general_rankings.csv"));
+const nationalsStates = readCsv(path.join(outputDir, "nationals_rankings.csv"));
+const nationalsById = new Map(nationalsStates.map(row=>[row.schoolId,row]));
 const historyRows = readCsv(path.join(outputDir, "rating_history.csv"));
+const nationalsPredictionRows = readCsv(path.join(outputDir, "nationals_prediction_history.csv"));
 const currentById = new Map(currentStates.map((row) => [row.schoolId, row]));
 const history = {};
 
@@ -82,6 +85,12 @@ for (const row of historyRows) {
     number(row.fieldSize),
     number(row.ratingChange),
     row.level,
+    number(row.fullStrengthProbability) ?? 1,
+    number(row.fullStrengthWeight) ?? 1,
+    number(row.nationalsPostRating),
+    number(row.nationalsRatingChange),
+    number(row.postNationalsAdjustment) ?? 0,
+    number(row.postNationalsAppearances) ?? 0,
   ]);
   history[row.schoolId] = schoolHistory;
 }
@@ -90,16 +99,41 @@ for (const schoolHistory of Object.values(history)) {
   schoolHistory.sort((left, right) => left[0].localeCompare(right[0]));
 }
 
+// An incomplete Nationals appearance may update the conditional adjustment
+// while being ineligible for General Elo. Do not invent a General rated point.
+const ratedAppearances = new Set(historyRows.map(row=>`${row.schoolId}|${row.tournamentId}`));
+const generalPostByDate = new Map(historyRows.map(row=>[
+  `${row.schoolId}|${row.date}`,number(row.combinedSameDayPostRating ?? row.postRating),
+]));
+const knownSchools = new Set(allStates.map(row=>row.schoolId));
+const nationalsOnlyHistory = {};
+for (const row of nationalsPredictionRows) {
+  if (!knownSchools.has(row.schoolId) || !(number(row.evidenceCoverage)>0) ||
+      ratedAppearances.has(`${row.schoolId}|${row.tournamentId}`)) continue;
+  const generalPost=generalPostByDate.get(`${row.schoolId}|${row.date}`) ?? number(row.preRating);
+  const before=number(row.nationalsAdjustment), after=number(row.postNationalsAdjustment);
+  const points=nationalsOnlyHistory[row.schoolId] ?? [];
+  points.push([row.date,generalPost,null,row.tournamentId,number(row.actualRank),number(row.fieldSize),
+    0,'Nationals',1,1,generalPost+after,after-before,after,number(row.postNationalsAppearances),true]);
+  nationalsOnlyHistory[row.schoolId]=points;
+}
+
 const schools = allStates
   .filter((row) => row.division === "C")
   .map((row) => {
     const current = currentById.get(row.schoolId);
+    const nationals = nationalsById.get(row.schoolId);
     return {
       id: row.schoolId,
       name: row.canonicalName,
       city: row.city,
       state: row.state,
       rating: number(row.rating),
+      nationalsRating: number(row.nationalsRating),
+      nationalsAdjustment: number(row.nationalsAdjustment) ?? 0,
+      priorNationalsAppearances: number(row.priorNationalsAppearances) ?? 0,
+      nationalsNationalRank: number(nationals?.nationalRank),
+      nationalsStateRank: number(nationals?.stateRank),
       uncertainty: number(row.uncertainty),
       appearances: number(row.appearances),
       lastSeason: number(row.lastSeason),
@@ -122,6 +156,7 @@ const payload = {
   latestSeason: report.latestSeasonByDivision?.C,
   schools,
   history,
+  nationalsOnlyHistory,
 };
 
 fs.mkdirSync(destinationDir, { recursive: true });

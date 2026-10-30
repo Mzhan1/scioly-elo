@@ -3,3 +3,4 @@ data/duosmium/
 output/
 .DS_Store
 *.log
+__pycache__/

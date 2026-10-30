@@ -1,0 +1,73 @@
+{
+  "modelVersion": "so-rating-v2.6",
+  "ratingDivisor": 225,
+  "mean": 1500,
+  "initialUncertainty": 168.75,
+  "minimumUncertainty": 19.6875,
+  "maximumUncertainty": 196.875,
+  "baseK": 90,
+  "minimumUncertaintyFactor": 0.5,
+  "maximumUncertaintyFactor": 0.7,
+  "maximumEffectiveGames": 12,
+  "minimumOverallEvidenceCoverage": 0.75,
+  "sameDayFieldStrengthTemperature": 112.5,
+  "minimumSplitSquadRawWeight": 0.2,
+  "topFieldFraction": 0.25,
+  "minimumTopFieldSize": 3,
+  "maximumTopFieldSize": 10,
+  "topFieldStrengthWeight": 0.7,
+  "minimumFieldQuality": 0.8,
+  "maximumFieldQuality": 1.3,
+  "fieldQualityRatingDivisor": 1687.5,
+  "establishedFieldQualityWeight": 0.1,
+  "scoreMarginLogStrength": 0.6,
+  "maximumScoreMarginMultiplier": 1.75,
+  "eventModel": {
+    "modelVersion": "so-event-v1.6",
+    "mean": 1500,
+    "initialUncertainty": 300,
+    "minimumUncertainty": 35,
+    "maximumUncertainty": 350,
+    "baseK": 2350,
+    "tournamentPerformanceUncertainty": 400,
+    "maximumEffectiveGames": 12,
+    "divisionCarryover": {
+      "C": 0.70,
+      "default": 0.70
+    },
+    "seasonUncertaintyIncrease": 140,
+    "inactivityUncertaintyPerYear": 400,
+    "topFieldFraction": 0.25,
+    "minimumTopFieldSize": 3,
+    "maximumTopFieldSize": 10,
+    "topFieldStrengthWeight": 0.7,
+    "minimumFieldQuality": 0.8,
+    "maximumFieldQuality": 1.3,
+    "fieldQualityRatingDivisor": 3000,
+    "establishedFieldQualityWeight": 0.1,
+    "minimumInformationWeight": 0.3,
+    "maximumInformationWeight": 1.35
+  },
+  "formatPrior": {
+    "traditional": 1.0,
+    "hybrid": 0.8,
+    "satellite": 0.75
+  },
+  "divisionCarryover": {
+    "C": 1.0,
+    "default": 1.0
+  },
+  "seasonUncertaintyIncrease": 56.25,
+  "inactivityUncertaintyPerYear": 25.3125,
+  "levelPrior": {
+    "nationals": 1.20,
+    "states": 1.05,
+    "state": 1.05,
+    "invitational": 1.00,
+    "regionals": 0.90,
+    "regional": 0.90,
+    "default": 0.95
+  },
+  "minimumInformationWeight": 0.35,
+  "maximumInformationWeight": 1.35
+}

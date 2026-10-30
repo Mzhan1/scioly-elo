@@ -15,6 +15,8 @@ ingestion and cannot affect overall or event-specific ratings.
 - uncertainty, inactivity growth, season regression, field-derived weighting,
   capped tournament information, and tournament performance ratings
 - reduced online/satellite evidence and same-day split-squad safeguards
+- probabilistic secondary-lineup weighting for unexpectedly poor invitational appearances
+- a separate Nationals rating adjusted by each school's earlier Nationals performances
 - top-heavy field quality and bounded total-score margin adjustments
 - best-squad-per-event ratings with separate uncertainty and season carryover
 - a calibrated rating scale used directly for expected-score calculations
@@ -37,7 +39,9 @@ pnpm test
 
 Generated files:
 
-- `output/national_rankings.csv`
+- `output/general_rankings.csv` — General view rankings
+- `output/nationals_rankings.csv` — Nationals-adjusted view rankings
+- `output/nationals_prediction_history.csv`
 - `output/all_program_states.csv`
 - `output/rating_history.csv`
 - `output/ranking_audit.csv`
@@ -56,13 +60,20 @@ pnpm web:data   # rebuild web/data/ratings.json from output/*.csv
 pnpm web        # open http://127.0.0.1:4173
 ```
 
-The dashboard supports school search, four-school comparison, one-to-five-year
+The dashboard supports General / Nationals views, school search, four-school comparison, one-to-five-year
 chart ranges, current and historical rating context, recent tournament results,
 and CSV export. Running `pnpm web` automatically builds the browser dataset if
 it is missing.
 
-`national_rankings.csv` contains Division C programs that competed in the
-archive's latest season. `all_program_states.csv` retains the final state of
+The Nationals view uses only earlier Nationals when adjusting a historical
+prediction. Open with `?rating=nationals` to select it directly. Current
+conditional rankings include all active programs, rather than only qualifiers.
+
+`general_rankings.csv` and `nationals_rankings.csv` contain Division C programs
+that competed in the archive's latest season, ranked for their respective views.
+Each rankings file has one `rating` column for that view. Comparison fields
+remain available in `all_program_states.csv` and the detailed histories.
+`all_program_states.csv` retains the final state of
 every historical Division C program.
 
 Model constants live in `config/model_v2.json`. Change the `modelVersion` when

@@ -6,7 +6,7 @@ import readline from "node:readline";
 
 const output = path.resolve(process.argv[2] ?? "output");
 const divisionFiles = [
-  "national_rankings.csv",
+  "general_rankings.csv",
   "all_program_states.csv",
   "rating_history.csv",
   "event_rankings.csv",

@@ -1,5 +1,10 @@
 {
-  "modelVersion": "so-rating-v2.6",
+  "modelVersion": "so-rating-v2.8",
+  "nationalsAdjustment": {
+    "enabled": true,
+    "strength": 1,
+    "priorAppearances": 5
+  },
   "ratingDivisor": 225,
   "mean": 1500,
   "initialUncertainty": 168.75,
@@ -12,6 +17,20 @@
   "minimumOverallEvidenceCoverage": 0.75,
   "sameDayFieldStrengthTemperature": 112.5,
   "minimumSplitSquadRawWeight": 0.2,
+  "lineupModel": {
+    "enabled": true,
+    "secondaryPrior": 0.05,
+    "secondaryPerformanceDrop": 350,
+    "performanceNoise": 210,
+    "minimumWeight": 0.05,
+    "minimumHistory": 3,
+    "nearbyDays": 2,
+    "nearbyOddsMultiplier": 32,
+    "partialCoverageThreshold": 0.85,
+    "partialOddsMultiplier": 4,
+    "singleSquadOddsMultiplier": 2.5,
+    "autumnOddsMultiplier": 1.5
+  },
   "topFieldFraction": 0.25,
   "minimumTopFieldSize": 3,
   "maximumTopFieldSize": 10,
@@ -23,21 +42,20 @@
   "scoreMarginLogStrength": 0.6,
   "maximumScoreMarginMultiplier": 1.75,
   "eventModel": {
-    "modelVersion": "so-event-v1.4",
+    "modelVersion": "so-event-v1.6",
     "mean": 1500,
     "initialUncertainty": 300,
     "minimumUncertainty": 35,
     "maximumUncertainty": 350,
-    "baseK": 235,
-    "minimumUncertaintyFactor": 0.5,
-    "maximumUncertaintyFactor": 0.7,
+    "baseK": 2350,
+    "tournamentPerformanceUncertainty": 400,
     "maximumEffectiveGames": 12,
     "divisionCarryover": {
       "C": 0.70,
       "default": 0.70
     },
     "seasonUncertaintyIncrease": 140,
-    "inactivityUncertaintyPerYear": 70,
+    "inactivityUncertaintyPerYear": 400,
     "topFieldFraction": 0.25,
     "minimumTopFieldSize": 3,
     "maximumTopFieldSize": 10,

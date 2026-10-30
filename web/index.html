@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./styles.css?v=2" />
+    <link rel="stylesheet" href="./styles.css?v=3" />
   </head>
   <body>
     <header class="site-header">
@@ -48,6 +48,14 @@
           </div>
         </div>
 
+        <div class="rating-mode-row">
+          <div class="view-switch" role="group" aria-label="Rating view">
+            <button type="button" class="active" data-rating-view="general" aria-pressed="true">General</button>
+            <button type="button" data-rating-view="nationals" aria-pressed="false">Nationals</button>
+          </div>
+          <p id="rating-view-description">General program strength from tournament results across the season.</p>
+        </div>
+
         <div class="school-picker">
           <label for="school-search">Select schools <span>Compare up to 4 programs</span></label>
           <div class="search-wrap">
@@ -64,7 +72,7 @@
         <div class="chart-card">
           <div class="chart-heading">
             <div>
-              <h3>Overall rating</h3>
+              <h3 id="rating-view-title">Overall rating</h3>
               <p>Updated after each rated tournament</p>
             </div>
             <button class="download-button" id="download-button" type="button">
@@ -131,6 +139,6 @@
       <p id="model-version">Model —</p>
     </footer>
 
-    <script type="module" src="./app.js?v=2"></script>
+    <script type="module" src="./app.js?v=3"></script>
   </body>
 </html>

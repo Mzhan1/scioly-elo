@@ -9,6 +9,16 @@ const config = JSON.parse(
   fs.readFileSync(new URL("../config/model_v2.json", import.meta.url), "utf8"),
 );
 
+test("skipping diagnostic performance ratings leaves predictions and updates unchanged", () => {
+  const tournament = scoreSciolyff(scoringFixture(), "fixture.yaml");
+  const full = new EventRatingEngine(config);
+  const fast = new EventRatingEngine(config, { calculatePerformanceRatings: false });
+  const expected = full.rateTournament(tournament);
+  const actual = fast.rateTournament(tournament);
+  assert.deepEqual(actual, expected.map(s => ({ ...s, performanceRating: undefined })));
+  assert.deepEqual(fast.states, full.states);
+});
+
 test("event ratings may select different school squads for different events", () => {
   const tournament = scoreSciolyff(scoringFixture(), "fixture.yaml");
   const snapshots = new EventRatingEngine(config).rateTournament(tournament);
@@ -139,6 +149,49 @@ test("event ratings retain little pre-graduation strength after five seasons", (
 test("event names receive stable case-insensitive canonical keys", () => {
   assert.equal(canonicalEventKey("  Experimental   Design "), "experimental design");
   assert.equal(canonicalEventKey("CODEBUSTERS"), "codebusters");
+});
+
+test("event updates respect school uncertainty instead of a minimum K-factor", () => {
+  const tournament = scoreSciolyff(scoringFixture({ includeLowerSquad:false }), "uncertainty.yaml");
+  function update(uncertainty) {
+    const engine = new EventRatingEngine(config);
+    const entry = tournament.teamEntries.find(e=>e.canonicalName==="Alpha High School");
+    const event = tournament.events.find(e=>e.canonicalName==="Astronomy");
+    engine.states.set(`${entry.schoolKey}\u0000astronomy`, {
+      ...engine.currentState(entry,event), rating:1400, uncertainty,
+    });
+    return engine.rateTournament(tournament).find(s=>s.schoolKey===entry.schoolKey && s.eventKey==="astronomy");
+  }
+  const certain=update(35), provisional=update(350);
+  assert.ok(certain.ratingChange>0);
+  assert.ok(certain.ratingChange<provisional.ratingChange/10);
+  assert.ok(provisional.postRating<provisional.tournamentPerformanceEstimate);
+});
+
+test("event process variance is additive over elapsed time", () => {
+  const tournament = scoreSciolyff(scoringFixture(), "time.yaml");
+  const entry = tournament.teamEntries[0], event = tournament.events[0];
+  const key = `${entry.schoolKey}\u0000${canonicalEventKey(event.canonicalName)}`;
+  const engine = new EventRatingEngine(config);
+  const initial = { ...engine.currentState(entry,event), uncertainty:80,
+    lastSeason:2026, lastDate:"2026-01-01" };
+  engine.states.set(key,initial);
+  const direct = engine.prepareState(entry,event,{season:2026,date:"2026-01-29"});
+  const middle = engine.prepareState(entry,event,{season:2026,date:"2026-01-15"});
+  engine.states.set(key,{...middle,lastDate:"2026-01-15"});
+  const split = engine.prepareState(entry,event,{season:2026,date:"2026-01-29"});
+  assert.ok(Math.abs(direct.uncertainty-split.uncertainty)<1e-9);
+});
+
+test("same-day event tournaments combine evidence without summing posterior jumps", () => {
+  const first = scoreSciolyff(scoringFixture({includeLowerSquad:false}), "first.yaml");
+  const second = scoreSciolyff(scoringFixture({includeLowerSquad:false}), "second.yaml");
+  const {snapshots} = new EventRatingEngine(config).rebuild([first,second]);
+  const results = snapshots.filter(s=>s.canonicalName==="Alpha High School" && s.eventKey==="astronomy");
+  assert.equal(results.length,2);
+  assert.equal(results[0].preRating,results[1].preRating);
+  assert.ok(results[0].combinedSameDayPostRating>results[0].postRating);
+  assert.ok(results[0].combinedSameDayPostRating<results[0].preRating+results.reduce((sum,s)=>sum+s.ratingChange,0));
 });
 
 test("event rebuilds are deterministic", () => {

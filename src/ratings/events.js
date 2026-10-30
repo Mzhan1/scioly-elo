@@ -1,5 +1,6 @@
 import { bestSchoolEventEvidence } from "../scoring/sciolyff.js";
 import { appearanceKey, tournamentFormatPrior } from "./evidence.js";
+import { tournamentPosterior, combineTournamentPosteriors } from "./tournament-posterior.js";
 
 const DAYS_PER_YEAR = 365.2425;
 
@@ -83,6 +84,7 @@ export class EventRatingEngine {
     {
       sameDayLineupWeights = new Map(),
       retainSnapshots = true,
+      calculatePerformanceRatings = true,
       onSnapshots,
     } = {},
   ) {
@@ -90,6 +92,7 @@ export class EventRatingEngine {
     this.eventConfig = this.config.eventModel;
     this.sameDayLineupWeights = sameDayLineupWeights;
     this.retainSnapshots = retainSnapshots;
+    this.calculatePerformanceRatings = calculatePerformanceRatings;
     this.onSnapshots = onSnapshots;
     this.states = new Map();
     this.snapshots = [];
@@ -130,7 +133,7 @@ export class EventRatingEngine {
       const inactiveYears = dateDifferenceYears(prior.lastDate, tournament.date);
       uncertainty = Math.sqrt(
         uncertainty ** 2 +
-          (inactiveYears * this.eventConfig.inactivityUncertaintyPerYear) ** 2,
+          inactiveYears * this.eventConfig.inactivityUncertaintyPerYear ** 2,
       );
     }
 
@@ -270,11 +273,6 @@ export class EventRatingEngine {
           opponents,
           (opponent) => actualScore(item.result.place, opponent.result.place),
         );
-        const uncertaintyFactor = clamp(
-          item.state.uncertainty / this.eventConfig.initialUncertainty,
-          this.eventConfig.minimumUncertaintyFactor,
-          this.eventConfig.maximumUncertaintyFactor,
-        );
         const effectiveGames = Math.min(
           this.eventConfig.maximumEffectiveGames,
           1 +
@@ -285,19 +283,22 @@ export class EventRatingEngine {
               ),
             ),
         );
-        const ratingChange =
-          this.eventConfig.baseK *
-          effectiveGames *
-          fieldInfo.informationWeight *
-          uncertaintyFactor *
-          item.evidenceWeight *
-          (actualPerformance - expectedPerformance);
-        const uncertaintyInformation =
-          item.evidenceWeight *
-          fieldInfo.informationWeight *
-          Math.max(0.35, 4 * expectedPerformance * (1 - expectedPerformance));
+        const posterior = tournamentPosterior({
+          rating: item.state.rating,
+          uncertainty: item.state.uncertainty,
+          initialUncertainty: this.eventConfig.initialUncertainty,
+          baseK: this.eventConfig.baseK,
+          divisor: 400,
+          performanceUncertainty: this.eventConfig.tournamentPerformanceUncertainty,
+          effectiveGames,
+          informationWeight: fieldInfo.informationWeight,
+          evidenceWeight: item.evidenceWeight,
+          opponents: opponents.map(o => ({ rating: o.state.rating,
+            score: actualScore(item.result.place, o.result.place), weight: o.evidenceWeight })),
+        });
+        const { ratingChange, uncertaintyInformation } = posterior;
         const postUncertainty = clamp(
-          item.state.uncertainty / Math.sqrt(1 + uncertaintyInformation),
+          posterior.postUncertainty,
           this.eventConfig.minimumUncertainty,
           this.eventConfig.maximumUncertainty,
         );
@@ -342,7 +343,9 @@ export class EventRatingEngine {
           expectedPerformance,
           actualPerformance,
           expectedRank: 1 + opponents.length * (1 - expectedPerformance),
-          performanceRating: this.performanceRating(item, prepared),
+          performanceRating: this.calculatePerformanceRatings
+            ? this.performanceRating(item, prepared)
+            : undefined,
           effectiveGames,
           preRating: item.state.rating,
           postRating: item.state.rating + ratingChange,
@@ -350,6 +353,7 @@ export class EventRatingEngine {
           postUncertainty,
           uncertaintyInformation,
           ratingChange,
+          tournamentPerformanceEstimate: posterior.tournamentPerformanceEstimate,
           modelVersion: this.eventConfig.modelVersion,
           priorAppearances: item.state.appearances,
         });
@@ -416,17 +420,10 @@ export class EventRatingEngine {
       for (const [key, stateSnapshots] of byState) {
         const baseline = stateOverrides.get(key);
         const latest = stateSnapshots.at(-1);
-        const combinedRating =
-          baseline.rating + stateSnapshots.reduce((sum, item) => sum + item.ratingChange, 0);
+        const combined = combineTournamentPosteriors(baseline, stateSnapshots);
+        const combinedRating = combined.rating;
         const combinedUncertainty = clamp(
-          baseline.uncertainty /
-            Math.sqrt(
-              1 +
-                stateSnapshots.reduce(
-                  (sum, item) => sum + item.uncertaintyInformation,
-                  0,
-                ),
-            ),
+          combined.uncertainty,
           this.eventConfig.minimumUncertainty,
           this.eventConfig.maximumUncertainty,
         );

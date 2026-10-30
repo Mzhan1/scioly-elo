@@ -8,6 +8,7 @@ import { auditHeadToHead } from "../src/analysis/head-to-head.js";
 import { EventRatingEngine } from "../src/ratings/events.js";
 import { RatingEngine } from "../src/ratings/model.js";
 import { rankMetrics } from "../src/analysis/rank-metrics.js";
+import { nationalsMetrics } from "../src/analysis/nationals-metrics.js";
 import { rankedEventStates, rankedStates, toCsv, toCsvRows } from "../src/export/csv.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -17,7 +18,8 @@ const throughSeason = process.argv[4] === undefined ? Infinity : Number(process.
 if (throughSeason !== Infinity && (!Number.isInteger(throughSeason) || throughSeason < 1900)) {
   throw new Error("Optional through-season must be an integer year");
 }
-const config = JSON.parse(fs.readFileSync(path.join(root, "config/model_v2.json"), "utf8"));
+const configPath = path.resolve(process.argv[5] ?? path.join(root, "config/model_v2.json"));
+const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
 const eventHistoryColumns = [
   "schoolId", "canonicalName", "city", "state", "division", "eventKey",
   "canonicalEvent", "tournamentId", "tournamentName", "date", "season", "level",
@@ -29,12 +31,13 @@ const eventHistoryColumns = [
   "expectedPerformance", "actualPerformance", "expectedRank", "performanceRating",
   "effectiveGames", "preRating", "postRating", "combinedSameDayPostRating",
   "preUncertainty", "postUncertainty", "uncertaintyInformation", "ratingChange",
+  "tournamentPerformanceEstimate",
   "modelVersion",
 ];
 
 if (!fs.existsSync(archive)) {
   console.error(`Duosmium results directory not found: ${archive}`);
-  console.error("Usage: node scripts/rebuild-ratings.js <duosmium-results-dir> [output-dir] [through-season]");
+  console.error("Usage: node scripts/rebuild-ratings.js <duosmium-results-dir> [output-dir] [through-season] [config-path]");
   process.exit(2);
 }
 
@@ -98,7 +101,8 @@ const eventPredictionMetrics = {
   normalizedRankMeanAbsoluteError:
     eventValidation.normalizedRankAbsoluteError / eventValidation.snapshots,
 };
-const allProgramStates = rankedStates(states);
+const decoratedStates = new Map([...states].map(([key,state]) => [key,engine.nationals.decorateState(state)]));
+const allProgramStates = rankedStates(decoratedStates);
 const latestSeasonByDivision = Object.fromEntries(
   [...states.values()].reduce((latest, state) => {
     latest.set(
@@ -109,11 +113,14 @@ const latestSeasonByDivision = Object.fromEntries(
   }, new Map()),
 );
 const currentStates = new Map(
-  [...states].filter(
+  [...decoratedStates].filter(
     ([, state]) => state.lastSeason === latestSeasonByDivision[state.division],
   ),
 );
 const rankings = rankedStates(currentStates);
+const nationalsRankings = rankedStates(new Map([...currentStates].map(([key,state]) => [key,{
+  ...state, rating:state.nationalsRating,
+}])));
 const allEventStates = rankedEventStates(eventStates);
 const currentEventStates = new Map(
   [...eventStates].filter(
@@ -129,6 +136,8 @@ const rankingColumns = [
   "nationalRank", "stateRank", "schoolId", "canonicalName", "city", "state",
   "division", "rating", "uncertainty", "appearances", "lastSeason", "lastDate",
 ];
+const nationalsRankingColumns = [...rankingColumns, "nationalsAdjustment", "priorNationalsAppearances"];
+const programStateColumns = [...rankingColumns, "nationalsRating", "nationalsAdjustment", "priorNationalsAppearances"];
 const historyColumns = [
   "schoolId", "canonicalName", "city", "state", "division", "tournamentId",
   "tournamentName", "date", "season", "level", "representativeTeamEntryId",
@@ -136,13 +145,18 @@ const historyColumns = [
   "fieldAverageRating", "topFieldStrength", "topFieldSize", "fieldStrength",
   "effectiveFieldSize", "evidenceCoverage", "evidenceWeight",
   "coverageEvidenceWeight", "sameDayTournamentCount", "lineupReliabilityWeight",
+  "fullStrengthProbability", "fullStrengthWeight", "fullStrengthPrior", "lineupAssessmentReason",
+  "performanceDeficit", "squadCount", "opponentEvidenceFactor",
   "tournamentFormat", "formatPrior", "fieldQuality",
   "expectedPerformance", "actualPerformance", "averageScoreMarginMultiplier",
+  "learningExpectedPerformance", "learningActualPerformance",
   "marginAdjustedResidual", "expectedRank",
   "performanceRating", "informationWeight", "preRating", "postRating",
   "effectiveGames",
   "preUncertainty", "postUncertainty", "uncertaintyInformation", "ratingChange",
   "combinedSameDayPostRating", "modelVersion",
+  "nationalsPreRating", "nationalsPostRating", "nationalsRatingChange", "nationalsAdjustment",
+  "postNationalsAdjustment", "priorNationalsAppearances", "postNationalsAppearances",
 ];
 const eventRankingColumns = [
   "nationalEventRank", "stateEventRank", "schoolId", "canonicalName", "city",
@@ -150,7 +164,14 @@ const eventRankingColumns = [
   "appearances", "lastSeason", "lastDate",
 ];
 
-fs.writeFileSync(path.join(output, "national_rankings.csv"), toCsv(rankings, rankingColumns));
+fs.writeFileSync(path.join(output, "general_rankings.csv"), toCsv(rankings, rankingColumns));
+fs.writeFileSync(path.join(output, "nationals_rankings.csv"), toCsv(nationalsRankings, nationalsRankingColumns));
+fs.writeFileSync(path.join(output, "nationals_prediction_history.csv"), toCsv(engine.nationalsPredictions,[
+  "schoolId","canonicalName","city","state","division","tournamentId","date","season","fieldSize",
+  "actualRank","evidenceCoverage","preRating","nationalsAdjustment","priorNationalsAppearances",
+  "nationalsPreRating","generalExpectedRank","nationalsExpectedRank","performanceRating","nationalsResidual",
+  "postNationalsAdjustment","postNationalsAppearances",
+]));
 fs.writeFileSync(
   path.join(output, "ranking_audit.csv"),
   toCsv(rankingAudit, [
@@ -161,7 +182,7 @@ fs.writeFileSync(
 );
 fs.writeFileSync(
   path.join(output, "all_program_states.csv"),
-  toCsv(allProgramStates, rankingColumns),
+  toCsv(allProgramStates, programStateColumns),
 );
 fs.writeFileSync(
   path.join(output, "rating_history.csv"),
@@ -183,11 +204,20 @@ fs.writeFileSync(
       ratingDivisor: config.ratingDivisor ?? 400,
       throughSeason: Number.isFinite(throughSeason) ? throughSeason : undefined,
       eventModelVersion: config.eventModel.modelVersion,
+      eventUpdateRule: "correlated-tournament-posterior",
+      eventTournamentPerformanceUncertainty: config.eventModel.tournamentPerformanceUncertainty,
       tournamentsProcessed: tournaments.length,
       schoolsRated: states.size,
       schoolsInCurrentRankings: currentStates.size,
       latestSeasonByDivision,
       snapshots: snapshots.length,
+      lineupModel: config.lineupModel,
+      nationalsAdjustment: config.nationalsAdjustment,
+      nationalsPredictionMetrics: nationalsMetrics(engine.nationalsPredictions),
+      lineupDiagnostics: {
+        discountedAppearances: snapshots.filter(s => s.fullStrengthWeight < 0.5).length,
+        minimallyCountedAppearances: snapshots.filter(s => s.fullStrengthWeight <= (config.lineupModel?.minimumWeight ?? 0)).length,
+      },
       eventRatings: eventStates.size,
       currentEventRatings: currentEventStates.size,
       eventSnapshots: eventEngine.snapshotCount,
